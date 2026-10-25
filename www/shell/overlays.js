@@ -1,0 +1,370 @@
+/**
+ * Cards over the whole app. Each returns a promise that settles when the
+ * player acts. Nothing here knows which game is running: celebrations and
+ * setbacks take their words from the game, and the art is the worn cat.
+ */
+
+import { cat, icons } from './art.js';
+import { startParty, reducedMotion } from './party.js';
+import APP from '../app.config.js';
+
+export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+export const PRIVACY_URL = APP.privacyUrl;
+
+let layer = null;
+export function mountOverlays(root) {
+  layer = document.createElement('div');
+  layer.className = 'overlays';
+  root.appendChild(layer);
+}
+
+/** Put a card up. `tone` picks the colour: milestone, locked or menu. */
+export function show(html, tone = 'locked') {
+  const card = document.createElement('div');
+  card.className = `ovl ovl-${tone}`;
+  card.innerHTML = html;
+  layer.appendChild(card);
+  requestAnimationFrame(() => card.classList.add('in'));
+  return card;
+}
+
+export async function dismiss(card) {
+  card.classList.remove('in');
+  await wait(220);
+  card.remove();
+}
+
+export const anyCardOpen = () => !!layer?.querySelector('.ovl');
+
+const button = (card, sel) => new Promise((resolve) => {
+  card.querySelector(sel).addEventListener('click', async () => { await dismiss(card); resolve(); });
+});
+
+const STAR = `<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="cel-star" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#fff3a1"/><stop offset=".55" stop-color="#ffc928"/><stop offset="1" stop-color="#f29a00"/></linearGradient></defs>
+  <path d="M24 3.5l6.1 12.6 13.9 2-10.1 9.7 2.4 13.8L24 35.1l-12.3 6.5 2.4-13.8L4 18.1l13.9-2z" fill="url(#cel-star)" stroke="#8a4a10" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M17 14.5l3.2-1 1.6-3.6" fill="none" stroke="#fffbe0" stroke-width="2.2" stroke-linecap="round" opacity=".9"/></svg>`;
+
+/**
+ * The juicy version, for a level beaten: a sunburst, five stars popping in
+ * one by one over a golden headline on a ribbon, fireworks and confetti over
+ * a darkened screen, the rewards popping in. `onBeat(kind, i)` fires on each
+ * star ('star'), firework ('boom') and the opening ('open'), so the host can
+ * play sound and buzz in time. Reduced motion: the same card, standing still.
+ */
+function juicyCelebrate({ headline = 'LEVEL UP!', ribbon = '', kicker, title, figure, reward, go, onShare, onBeat = () => {} }) {
+  const gains = [].concat(reward || []).filter(Boolean);
+  const card = show(`
+    <canvas class="cel-party" aria-hidden="true"></canvas>
+    <div class="ovl-stack cel-stack">
+      <div class="cel-banner">
+        <div class="cel-rays" aria-hidden="true"></div>
+        <div class="cel-stars">${[0, 1, 2, 3, 4].map((i) => `<i class="cel-star s${i}" style="--i:${i}">${STAR}</i>`).join('')}</div>
+        <h1 class="cel-headline" data-text="${headline}">${headline}</h1>
+        ${ribbon ? `<div class="cel-ribbon"><span>${ribbon}</span></div>` : ''}
+      </div>
+      ${cat('cheer', 210, 'ovl-cheer cel-cat')}
+      <div class="ovl-card cel-card">
+        <p class="ovl-kicker">${kicker}</p>
+        <h2 class="ovl-h">${title}</h2>
+        ${figure ? `<p class="ovl-figure cel-figure">${figure}</p>` : ''}
+        ${gains.length ? `<ul class="ovl-gains">${gains.map((r, i) => `<li style="--i:${i}">${r}</li>`).join('')}</ul>` : ''}
+        <button class="ovl-btn primary" data-go>${go}</button>
+        ${onShare ? `<button class="ovl-share" data-share>${icons.share(16)} Share</button>` : ''}
+      </div>
+    </div>`, 'milestone ovl-party');
+  card.querySelector('[data-share]')?.addEventListener('click', (e) => { e.stopPropagation(); onShare(); });
+
+  const timers = [];
+  let party = null;
+  if (!reducedMotion()) {
+    party = startParty(card.querySelector('.cel-party'));
+    const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+    onBeat('open', 0);
+    [0, 1, 2, 3, 4].forEach((i) => at(260 + i * 110, () => onBeat('star', i)));
+    at(120, () => party.confetti(70));
+    [[0.22, 0.2], [0.78, 0.17], [0.5, 0.1], [0.15, 0.32], [0.85, 0.3]].forEach(([x, y], i) => at(520 + i * 380, () => {
+      party.firework(x, y, { power: i === 2 ? 1.25 : 1 });
+      onBeat('boom', i);
+    }));
+    at(1500, () => party.confetti(40));
+    at(2800, () => party.confetti(30));
+  } else {
+    card.classList.add('still');
+  }
+  return button(card, '[data-go]').then(() => { timers.forEach(clearTimeout); party?.stop(); });
+}
+
+/** Sage, the worn cat cheering. A level, a record, whatever the game calls a win. */
+export function celebrate({ kicker = 'Well done', title, figure = '', reward = '', go = 'Keep going', onShare = null, juicy = false, headline, ribbon, onBeat }) {
+  if (juicy) return juicyCelebrate({ headline, ribbon, kicker, title, figure, reward, go, onShare, onBeat });
+  const card = show(`
+    <div class="ovl-stack">
+      ${cat('cheer', 210, 'ovl-cheer')}
+      <div class="ovl-card">
+        <p class="ovl-kicker">${kicker}</p>
+        <h2 class="ovl-h">${title}</h2>
+        ${figure ? `<p class="ovl-figure">${figure}</p>` : ''}
+        ${reward && reward.length ? `<ul class="ovl-gains">${[].concat(reward).map((r) => `<li>${r}</li>`).join('')}</ul>` : ''}
+        <button class="ovl-btn primary" data-go>${go}</button>
+        ${onShare ? `<button class="ovl-share" data-share>${icons.share(16)} Share</button>` : ''}
+      </div>
+    </div>`, 'milestone');
+  // Sharing leaves the card up: the player still taps Keep going after.
+  card.querySelector('[data-share]')?.addEventListener('click', (e) => { e.stopPropagation(); onShare(); });
+  return button(card, '[data-go]');
+}
+
+/** Taupe, the worn cat slumped. Whatever the game calls a loss. */
+export function setback({ kicker = 'Unlucky', title, figure = '', line = '', go = 'Try again' }) {
+  const card = show(`
+    <div class="ovl-stack">
+      ${cat('slump', 210, 'cat-lying')}
+      <div class="ovl-card">
+        <p class="ovl-kicker">${kicker}</p>
+        <h2 class="ovl-h">${title}</h2>
+        ${figure ? `<p class="ovl-figure">${figure}</p>` : ''}
+        ${line ? `<p class="ovl-sub">${line}</p>` : ''}
+        <button class="ovl-btn primary" data-go>${go}</button>
+      </div>
+    </div>`, 'locked');
+  return button(card, '[data-go]');
+}
+
+/** Two buttons. Resolves true on confirm, false on cancel. */
+export function confirm({ kicker, title, line, ok, cancel = 'Back' }) {
+  return new Promise((resolve) => {
+    const card = show(`
+      <div class="ovl-body">
+        <p class="ovl-kicker">${kicker}</p>
+        <p class="ovl-title">${title}</p>
+        <p class="ovl-sub">${line}</p>
+        <button class="ovl-btn primary" data-ok>${ok}</button>
+        <button class="ovl-btn ghost" data-cancel>${cancel}</button>
+      </div>`, 'locked');
+    const pick = async (v) => { await dismiss(card); resolve(v); };
+    card.querySelector('[data-ok]').addEventListener('click', () => pick(true));
+    card.querySelector('[data-cancel]').addEventListener('click', () => pick(false));
+  });
+}
+
+/**
+ * A friendly two-button question, in the same card as a celebration: the worn
+ * cat cheering over a cream card. Resolves true on `ok`, false on `cancel`.
+ */
+export function ask({ kicker, title, line, ok, cancel }) {
+  return new Promise((resolve) => {
+    const card = show(`
+      <div class="ovl-stack">
+        ${cat('cheer', 210, 'ovl-cheer')}
+        <div class="ovl-card">
+          <p class="ovl-kicker">${kicker}</p>
+          <h2 class="ovl-h">${title}</h2>
+          <p class="ovl-sub">${line}</p>
+          <button class="ovl-btn primary" data-ok>${ok}</button>
+          <button class="ovl-btn ghost" data-cancel>${cancel}</button>
+        </div>
+      </div>`, 'milestone');
+    const pick = async (v) => { await dismiss(card); resolve(v); };
+    card.querySelector('[data-ok]').addEventListener('click', () => pick(true));
+    card.querySelector('[data-cancel]').addEventListener('click', () => pick(false));
+  });
+}
+
+/**
+ * A card with several ways out, best first: [{ id, label, primary }], then a
+ * plain cancel. Resolves the chosen id, or null.
+ */
+export function choose({ kicker, title, line, choices, cancel = 'Not now' }) {
+  return new Promise((resolve) => {
+    const card = show(`
+      <div class="ovl-stack">
+        ${cat('slump', 210, 'cat-lying')}
+        <div class="ovl-card">
+          <p class="ovl-kicker">${kicker}</p>
+          <h2 class="ovl-h">${title}</h2>
+          <p class="ovl-sub">${line}</p>
+          ${choices.map((c) => `<button class="ovl-btn ${c.primary ? 'primary' : 'alt'}" data-choice="${c.id}">${c.label}</button>`).join('')}
+          <button class="ovl-btn ghost" data-cancel>${cancel}</button>
+        </div>
+      </div>`, 'locked');
+    const pick = async (v) => { await dismiss(card); resolve(v); };
+    card.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      pick(b.matches('[data-cancel]') ? null : b.dataset.choice);
+    });
+  });
+}
+
+/**
+ * "Ad break": the worn cat, a title, and a bar that fills over `ms`. It says
+ * an ad is coming before it comes. Returns { done, close }: `done` resolves
+ * when the bar is full; `close` takes the card down after the ad.
+ */
+export function adBreak(ms = 2000) {
+  const card = show(`
+    <div class="ovl-stack">
+      ${cat('cheer', 210, 'ovl-cheer')}
+      <div class="ovl-card ad-break" role="status" aria-live="assertive">
+        <p class="ovl-kicker">Thanks for playing</p>
+        <h2 class="ovl-h">Ad break</h2>
+        <p class="ovl-sub">Back in a moment</p>
+        <div class="ad-break-bar"><i style="animation-duration:${ms}ms"></i></div>
+      </div>
+    </div>`, 'milestone');
+  return { done: wait(ms), close: () => dismiss(card) };
+}
+
+function pickMenu(kicker, title, items, note = '') {
+  return new Promise((resolve) => {
+    const card = show(`
+      <div class="ovl-stack">
+        <div class="ovl-card">
+          <p class="ovl-kicker">${kicker}</p>
+          <h2 class="ovl-h">${title}</h2>
+          <div class="menu">${items.join('')}</div>
+          ${note}
+        </div>
+      </div>`, 'menu');
+    card.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-pick]');
+      if (!b) return;
+      await dismiss(card);
+      resolve(b.dataset.pick);
+    });
+  });
+}
+
+/** The pause menu. Restart only appears if the game says it can restart. */
+export function pauseMenu({ canRestart, title }) {
+  return pickMenu('Paused', title, [
+    `<button class="primary" data-pick="resume">${icons.play(20)}<span>Resume</span></button>`,
+    `<button data-pick="progress">${icons.bars(20)}<span>Progress</span></button>`,
+    `<button data-pick="cats">${icons.cat(20)}<span>Cats</span></button>`,
+    `<button data-pick="shop">${icons.shop(20)}<span>Shop</span></button>`,
+    canRestart ? `<button data-pick="restart">${icons.restart(20)}<span>Restart</span></button>` : '',
+    `<button data-pick="lobby">${icons.home(20)}<span>Back to lobby</span></button>`,
+  ]);
+}
+
+/**
+ * Settings, from the lobby gear. The privacy policy is a plain link: a browser
+ * opens a tab, and the Android shell hands any outside address to the phone's
+ * browser, since the app itself has no internet permission.
+ */
+export function settings({ title, note, privacy = false, reminders = null, version = '', audio = null, share = false, cloud = null }) {
+  // `version`: tapped 5 times, it resolves 'adstatus' (a tester's readout).
+  // `privacy` only when Google's consent SDK says this player must be offered
+  // their choices (the US "do not sell or share" link). The form is Google's.
+  const picked = pickMenu('Settings', title, [
+    `<a class="menu-link" href="${PRIVACY_URL}" target="_blank" rel="noopener noreferrer">
+       ${icons.lock(20)}<span>Privacy Policy</span>${icons.external(16)}
+     </a>`,
+    !privacy ? '' : `
+     <button data-pick="privacy">${icons.lock(20)}<span>Do not sell or share my info</span></button>`,
+    audio === null ? '' : `
+     <button class="menu-toggle" data-pick="sfx" role="switch" aria-checked="${audio.sfx}">
+       ${icons.speaker(20)}<span>Sound effects</span>
+       <i class="switch ${audio.sfx ? 'on' : ''}"></i>
+     </button>
+     <button class="menu-toggle" data-pick="music" role="switch" aria-checked="${audio.music}">
+       ${icons.music(20)}<span>Music</span>
+       <i class="switch ${audio.music ? 'on' : ''}"></i>
+     </button>`,
+    reminders === null ? '' : `
+     <button class="menu-toggle" data-pick="reminders" role="switch" aria-checked="${reminders}">
+       ${icons.daily(20)}<span>Reminders: Rewards Box and Bell Quest</span>
+       <i class="switch ${reminders ? 'on' : ''}"></i>
+     </button>`,
+    cloud === null ? '' : cloud.signedIn
+      ? `<button data-pick="cloud">${icons.cloud(20)}<span>Backed up · ${cloud.player || 'Play Games'}</span></button>`
+      : `<button data-pick="cloud">${icons.cloud(20)}<span>Back up with Play Games</span></button>`,
+    !share ? '' : `<button data-pick="share">${icons.share(20)}<span>Share ${title}</span></button>`,
+    `<button data-pick="erase">${icons.undo(20)}<span>Erase all progress</span></button>`,
+    `<button class="primary" data-pick="close">${icons.play(20)}<span>Done</span></button>`,
+  ], (note ? `<p class="ovl-sub settings-note">${note}</p>` : '')
+    + (version ? `<p class="settings-version">Version ${version}</p>` : ''));
+  const v = [...layer.querySelectorAll('.settings-version')].pop();
+  let taps = 0;
+  // Runs before the card's own click handler, so the 5th tap becomes a pick.
+  v?.addEventListener('click', () => { if (++taps >= 5) v.dataset.pick = 'adstatus'; });
+  return picked;
+}
+
+/**
+ * A note that slides in over the game and leaves by itself. Never blocks play:
+ * a task finishing mid-board should not interrupt the board.
+ */
+export function toast(html, ms = 2600) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = html;
+  // Two at once (a daily task and a quest step, say) stack instead of overlapping.
+  el.style.setProperty('--stack', layer.querySelectorAll('.toast').length);
+  layer.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('in'));
+  setTimeout(() => { el.classList.remove('in'); setTimeout(() => el.remove(), 300); }, ms);
+}
+
+/**
+ * The Rewards Box. Resolves 'open', 'ad' (open early for an ad) or 'close'.
+ * The gift is an icon for now; an illustration can replace .box-art later.
+ */
+/**
+ * Tomorrow's gift (gift.js). `ready: false` is the promise, shown once after a
+ * new player's third level: a locked gift that opens tomorrow, with a reminder
+ * on offer. `ready: true` opens it. Resolves 'remind', 'ok' or 'open'.
+ */
+export function giftCard({ ready, coins, remind = false }) {
+  const amount = Number(coins).toLocaleString('en-US');
+  return new Promise((resolve) => {
+    const card = show(`
+      <div class="ovl-stack">
+        <div class="ovl-card box-card gift-card">
+          <p class="ovl-kicker">${ready ? 'Welcome back' : 'Come back tomorrow'}</p>
+          <div class="box-art ${ready ? 'ready' : 'locked'}">${icons.gift(64)}${ready ? '' : `<span class="gift-lock">${icons.lock(22)}</span>`}</div>
+          <h2 class="ovl-h">${ready ? 'Your gift is ready' : 'A gift opens tomorrow'}</h2>
+          <p class="ovl-sub">${ready ? `${amount} coins, as promised` : `${amount} coins, free. Just open the app tomorrow.`}</p>
+          ${ready
+            ? '<button class="ovl-btn primary" data-pick="open">Open it</button>'
+            : remind
+              ? '<button class="ovl-btn primary" data-pick="remind">Remind me tomorrow</button><button class="ovl-btn ghost" data-pick="ok">I\'ll remember</button>'
+              : '<button class="ovl-btn primary" data-pick="ok">Got it</button>'}
+        </div>
+      </div>`, ready ? 'milestone' : 'menu');
+    card.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-pick]');
+      if (!b) return;
+      await dismiss(card);
+      resolve(b.dataset.pick);
+    });
+  });
+}
+
+export function boxCard({ ready, wait: waitText, adOffer, adsLeft }) {
+  return new Promise((resolve) => {
+    const card = show(`
+      <div class="ovl-stack">
+        <div class="ovl-card box-card">
+          <p class="ovl-kicker">Rewards box</p>
+          <div class="box-art ${ready ? 'ready' : ''}">${icons.gift(64)}</div>
+          <h2 class="ovl-h">${ready ? 'Your box is ready' : `Next box in ${waitText}`}</h2>
+          <p class="ovl-sub">${ready
+            ? 'Grows as you level up'
+            : `New box every 4h${adOffer ? ` · ad opens it now (${adsLeft} left today)` : ''}`}</p>
+          ${ready ? '<button class="ovl-btn primary" data-pick="open">Open it</button>' : ''}
+          ${!ready && adOffer
+            ? '<button class="ovl-btn primary" data-pick="ad">Watch an ad &middot; open now</button>'
+            : ''}
+          <button class="ovl-btn ghost" data-pick="close">${ready ? 'Later' : 'Close'}</button>
+        </div>
+      </div>`, 'menu');
+    card.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-pick]');
+      if (!b) return;
+      await dismiss(card);
+      resolve(b.dataset.pick);
+    });
+  });
+}
